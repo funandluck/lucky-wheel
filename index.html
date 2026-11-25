@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Lucky Wheel</title>
+  <meta name="theme-color" content="#140b2e" />
+  <meta name="description" content="Pick your lucky number and win the prize." />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/home"><span class="brand-dot">★</span><span id="brandName">Lucky Wheel</span></a>
+    <nav id="nav"></nav>
+  </header>
+  <div id="demoBanner" class="demo-banner" hidden>Demo mode: data is saved on this device only. Connect Supabase to go live.</div>
+  <main id="view"><div class="loading">Loading…</div></main>
+  <footer class="foot"><a href="#/admin">Admin</a></footer>
+  <div id="modalRoot"></div>
+  <div id="toast" class="toast"></div>
+  <canvas id="confetti"></canvas>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
