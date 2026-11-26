@@ -36,7 +36,7 @@ async function initSupabase() {
     const m = (e && (e.message || e.error_description)) || "";
     if (/Invalid login credentials/i.test(m)) return "Wrong email or password.";
     if (/Anonymous sign-ins are disabled/i.test(m)) return "Anonymous sign-ins are off in Supabase (see README).";
-    if (/row-level security|permission denied/i.test(m)) return "Not allowed.";
+    if (/row-level security|permission denied/i.test(m)) return "Not allowed (" + m + ").";
     if (/Failed to fetch|NetworkError/i.test(m)) return "No connection. Check your internet and try again.";
     return m || "Something went wrong.";
   };
@@ -112,6 +112,16 @@ async function initSupabase() {
       else loaders.forEach((f) => f());
     },
     startDraw: (wid, data) => after(sb.rpc("start_draw", { p_wheel: wid, p_data: data })),
+
+    // push notifications for the admin (see notifications.sql + supabase/functions/notify-admin)
+    push: true,
+    async savePush(sub) { ok(await sb.from("push_subs").upsert({ endpoint: sub.endpoint, sub }, { onConflict: "endpoint" })); },
+    async removePush(endpoint) { ok(await sb.from("push_subs").delete().eq("endpoint", endpoint)); },
+    async testPush(url) {
+      const { data, error } = await sb.functions.invoke("notify-admin", { body: { test: true, url } });
+      if (error) { let m = error.message; try { const j = await error.context.json(); m = j.error || m; } catch (e) {} throw new Error(m); }
+      return data;
+    },
     async resetRound(wid) {
       ok(await sb.from("requests").delete().eq("wheel_id", wid));
       ok(await sb.from("numbers").delete().eq("wheel_id", wid));
@@ -186,6 +196,7 @@ function initDemo() {
       if (req) { const rs = store.get("requests", {}); const r = rs[req.id]; if (r) { r.nums = r.nums.filter((x) => x !== n); if (!r.nums.length) delete rs[req.id]; } save("requests", rs); }
     },
     async startDraw(wid, data) { await this.saveWheel(wid, { draw: { ...data, startedAt: Date.now() } }); },
+    push: false,
     async resetRound(wid) {
       const all = store.get("numbers", {}); Object.keys(all).forEach((k) => all[k].wheelId === wid && delete all[k]); save("numbers", all);
       const rs = store.get("requests", {}); Object.keys(rs).forEach((k) => rs[k].wheelId === wid && delete rs[k]); save("requests", rs);

@@ -1,5 +1,6 @@
 import { initBackend } from "./backend.js";
-import { SITE_NAME } from "./config.js";
+import * as CFG from "./config.js";
+const SITE_NAME = CFG.SITE_NAME || "Lucky Wheel";
 
 /* ---------------- state & helpers ---------------- */
 const S = { user: undefined, wheels: [], wheelsLoaded: false, numbers: [], requests: [], selected: new Set(), selWheel: null, autoDrawDone: new Set(), shownWinnerFor: new Set() };
@@ -339,7 +340,7 @@ function AdminLoginView() {
       const fg = $("#forgot", el); if (fg) fg.onclick = async (e) => { e.preventDefault(); const em = f.email.value.trim(); if (!em) return ($("#lErr", el).textContent = "Write your email first."); try { await api.resetPassword(em); toast("Reset link sent to your email."); } catch (er) { $("#lErr", el).textContent = er.message; } };
       f.onsubmit = async (e) => {
         e.preventDefault(); const b = $("#lBtn", el); b.disabled = true; $("#lErr", el).textContent = "";
-        try { await api.adminLogin(f.email.value.trim(), f.password.value); } catch (er) { $("#lErr", el).textContent = er.message; b.disabled = false; }
+        try { await api.adminLogin(f.email.value.trim(), f.password.value); } catch (er) { const le = $("#lErr", el); if (le) le.textContent = er.message; b.disabled = false; console.error(er); }
       };
     },
   };
@@ -638,10 +639,11 @@ function AdminView() {
       el = root;
       el.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:14px"><h1 class="page-title">Admin</h1><button class="btn gold sm" id="addW">+ Add wheel</button></div>
         <section class="card"><h2>Requests to approve <span class="muted" id="pendCount"></span></h2><div id="pending"></div></section>
+        <section class="card" id="notifCard"><h2>🔔 Notifications</h2><p class="muted small" style="margin-top:0">Get a notification on this phone for every new request, even when the app is closed.</p><div id="notifBody"></div></section>
         <section class="card"><h2>Wheels <span class="muted" id="wCount"></span></h2><div id="wheels"></div></section>
         ${TemplatesCard()}`;
       $("#addW", el).onclick = () => openAddWheel();
-      bindRequestActions(el); bindTemplates(el);
+      bindRequestActions(el); bindTemplates(el); renderNotif($("#notifBody", el));
     },
     update() {
       const list = sortedWheels(), pend = pendingReqs();
@@ -654,6 +656,49 @@ function AdminView() {
       }).join("")}</table></div><p class="small muted" style="margin-bottom:0">Tap a prize to manage it.</p>` : `<div class="empty">No wheels yet. Tap “+ Add wheel”.</div>`;
     },
   };
+}
+
+
+/* ---------------- push notifications (admin) ---------------- */
+function b64ToBytes(b64) { const p = "=".repeat((4 - (b64.length % 4)) % 4); const raw = atob((b64 + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from([...raw].map((c) => c.charCodeAt(0))); }
+async function swReg() {
+  if (!("serviceWorker" in navigator)) return null;
+  try { await navigator.serviceWorker.register("sw.js"); } catch (e) {}
+  return Promise.race([navigator.serviceWorker.ready, new Promise((r) => setTimeout(() => r(null), 6000))]);
+}
+async function renderNotif(box) {
+  if (!box) return;
+  const say = (html) => (box.innerHTML = html);
+  if (!api.push) return say(`<div class="empty">Notifications work once the site is connected to Supabase.</div>`);
+  if (!CFG.VAPID_PUBLIC_KEY) return say(`<div class="empty">Add your VAPID public key in <b>config.js</b> to turn this on (see README).</div>`);
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    return say(isIOS() && !isStandalone()
+      ? `<p class="small">On iPhone: open this site in Safari → <b>Share</b> → <b>Add to Home Screen</b>. Then open the app from the home screen, come back here, and turn notifications on.</p>`
+      : `<div class="empty">This browser can't receive notifications. Use Chrome on Android, or the installed app on iPhone.</div>`);
+  }
+  if (Notification.permission === "denied") return say(`<p class="small" style="color:var(--amber)">Notifications are blocked for this site. Allow them in the browser / phone settings for this site, then reload.</p>`);
+  say(`<div class="muted small">Checking…</div>`);
+  const reg = await swReg();
+  const sub = reg && (await reg.pushManager.getSubscription());
+  if (sub) {
+    say(`<p style="margin:0 0 10px"><span class="chip green">On for this device ✓</span></p><div class="row"><button class="btn ghost sm" id="nTest">Send a test</button><button class="btn ghost sm" id="nOff">Turn off</button></div>`);
+    $("#nTest", box).onclick = async (e) => { e.target.disabled = true; try { const r = await api.testPush(location.origin + location.pathname + "#/admin"); toast(r && r.sent ? `Test sent to ${r.sent} device${r.sent > 1 ? "s" : ""} ✓` : "Sent, but no device is registered yet."); } catch (er) { toast("Test failed: " + er.message); } e.target.disabled = false; };
+    $("#nOff", box).onclick = async () => { try { await api.removePush(sub.endpoint); } catch (e) {} await sub.unsubscribe().catch(() => {}); toast("Notifications off"); renderNotif(box); };
+  } else {
+    say(`<button class="btn gold" id="nOn">🔔 Turn on notifications</button>`);
+    $("#nOn", box).onclick = async (e) => {
+      e.target.disabled = true;
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") throw new Error("Permission not given.");
+        const r = reg || (await swReg()); if (!r) throw new Error("The app is not ready. Reload and try again.");
+        const s = await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(CFG.VAPID_PUBLIC_KEY) });
+        await api.savePush(s.toJSON());
+        toast("Notifications on ✓");
+      } catch (er) { toast(er.message || "Couldn't turn on"); }
+      renderNotif(box);
+    };
+  }
 }
 
 /* ---------------- ADMIN: one wheel ---------------- */
