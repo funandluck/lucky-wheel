@@ -55,8 +55,24 @@ async function initSupabase() {
   document.addEventListener("visibilitychange", () => { if (!document.hidden) loaders.forEach((f) => f()); });
   window.addEventListener("online", () => loaders.forEach((f) => f()));
 
+  // make sure this visitor has its invisible anonymous session before taking numbers
+  let visitorP = null;
+  async function ensureVisitor(force) {
+    const { data } = await sb.auth.getSession();
+    if (data?.session && !force) return;
+    if (!visitorP) visitorP = (async () => {
+      if (force) { try { await sb.auth.refreshSession(); const s = await sb.auth.getSession(); if (s.data?.session) return; } catch (e) {} }
+      const { error } = await sb.auth.signInAnonymously();
+      if (error) throw new Error(/rate limit|too many/i.test(error.message) ? "Too many people right now. Wait a minute and try again." : "Couldn't connect (" + error.message + "). Try again.");
+    })().finally(() => { visitorP = null; });
+    await visitorP;
+  }
+
   async function claim(wid, nums, name, phone, note, asAdmin) {
-    const { data, error } = await sb.rpc("claim_numbers", { p_wheel: wid, p_nums: nums, p_name: name, p_phone: phone, p_note: note || "", p_as_admin: asAdmin });
+    if (!asAdmin) await ensureVisitor(false);
+    const call = () => sb.rpc("claim_numbers", { p_wheel: wid, p_nums: nums, p_name: name, p_phone: phone, p_note: note || "", p_as_admin: asAdmin });
+    let { data, error } = await call();
+    if (error && /reload the page/i.test(error.message || "") && !asAdmin) { await ensureVisitor(true); ({ data, error } = await call()); }
     if (error) {
       const m = error.message || "";
       if (m.startsWith("TAKEN:")) { const t = m.slice(6).split(",").filter(Boolean).map(Number); const e = new Error(`Sorry, ${t.length > 1 ? "numbers " + t.join(", ") + " were" : "number " + t[0] + " was"} just taken by someone else. Pick another.`); e.taken = t; throw e; }
@@ -74,8 +90,7 @@ async function initSupabase() {
         const u = session?.user;
         if (!u) {
           current = null; cb(null);
-          const { error } = await sb.auth.signInAnonymously();
-          if (error) console.warn("Visitor sign-in failed:", error.message);
+          try { await ensureVisitor(false); } catch (e) { console.warn("Visitor sign-in failed:", e.message); }
           return;
         }
         current = { uid: u.id, email: u.email || "", isAdmin: !u.is_anonymous && isAdminEmail(u.email) };
