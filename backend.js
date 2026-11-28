@@ -11,7 +11,7 @@ const isAdminEmail = (e) => ADMIN_EMAILS.map((x) => x.toLowerCase()).includes(St
 
 export const DEFAULT_WHEEL = {
   prizeTitle: "New prize", prizeDesc: "Pick your lucky number and win!", prizeImage: "",
-  totalNumbers: 100, price: 5, currency: "$", whishNumber: "", whishName: "", groupLink: "", drawAt: null, draw: null,
+  totalNumbers: 100, price: 5, currency: "$", whishNumber: "", whishName: "", groupLink: "", sponsors: [], drawAt: null, draw: null,
 };
 const clean = (s, max) => String(s || "").trim().replace(/\s+/g, " ").slice(0, max);
 
@@ -26,8 +26,8 @@ async function initSupabase() {
   const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
   let current = null;
 
-  const wheelFrom = (r) => ({ id: r.id, prizeTitle: r.prize_title, prizeDesc: r.prize_desc, prizeImage: r.prize_image, totalNumbers: r.total_numbers, price: Number(r.price), currency: r.currency, whishNumber: r.whish_number, whishName: r.whish_name, groupLink: r.group_link || "", drawAt: r.draw_at == null ? null : Number(r.draw_at), draw: r.draw || null, createdAt: Number(r.created_at) });
-  const WHEEL_COLS = { prizeTitle: "prize_title", prizeDesc: "prize_desc", prizeImage: "prize_image", totalNumbers: "total_numbers", price: "price", currency: "currency", whishNumber: "whish_number", whishName: "whish_name", groupLink: "group_link", drawAt: "draw_at", draw: "draw" };
+  const wheelFrom = (r) => ({ id: r.id, prizeTitle: r.prize_title, prizeDesc: r.prize_desc, prizeImage: r.prize_image, totalNumbers: r.total_numbers, price: Number(r.price), currency: r.currency, whishNumber: r.whish_number, whishName: r.whish_name, groupLink: r.group_link || "", sponsors: Array.isArray(r.sponsors) ? r.sponsors : [], drawAt: r.draw_at == null ? null : Number(r.draw_at), draw: r.draw || null, createdAt: Number(r.created_at) });
+  const WHEEL_COLS = { prizeTitle: "prize_title", prizeDesc: "prize_desc", prizeImage: "prize_image", totalNumbers: "total_numbers", price: "price", currency: "currency", whishNumber: "whish_number", whishName: "whish_name", groupLink: "group_link", sponsors: "sponsors", drawAt: "draw_at", draw: "draw" };
   const wheelTo = (d) => { const o = {}; for (const k in d) if (WHEEL_COLS[k]) o[WHEEL_COLS[k]] = d[k]; return o; };
   const numFrom = (r) => ({ wheelId: r.wheel_id, n: r.n, name: r.name, status: r.status, reqId: r.req_id, uid: r.uid, createdAt: Number(r.created_at) });
   const reqFrom = (r) => ({ id: r.id, wheelId: r.wheel_id, nums: r.nums || [], name: r.name, phone: r.phone, status: r.status, source: r.source, note: r.note, uid: r.uid, createdAt: Number(r.created_at) });

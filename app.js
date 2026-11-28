@@ -38,6 +38,26 @@ function wheelStatus(w) {
 const STATUS_LABEL = { open: ["Open", "green"], soldout: ["Sold out", "amber"], scheduled: ["Draw scheduled", "amber"], ready: ["Draw time!", "red"], spinning: ["LIVE now", "red"], done: ["Finished", ""] };
 const statusChip = (w) => { const [t, c] = STATUS_LABEL[wheelStatus(w)]; return `<span class="chip ${c}">${t}</span>`; };
 
+// thin scrolling bar of sponsor logos (nothing when the wheel has no sponsors)
+function sponsorStrip(w) {
+  const sp = Array.isArray(w?.sponsors) ? w.sponsors.filter((x) => x && x.img) : [];
+  if (!sp.length) return "";
+  const one = sp.map((x) => `<img src="${esc(x.img)}" alt="${esc(x.name || "Sponsor")}" loading="lazy">`).join("");
+  const reps = Math.max(1, Math.ceil(8 / sp.length)), half = one.repeat(reps);
+  return `<div class="sponsors" aria-label="Sponsors"><div class="sp-track" style="animation-duration:${Math.max(14, reps * sp.length * 3)}s">${half}${half}</div></div>`;
+}
+// "Sponsored by" on the left and right of the numbers page (side rails on big screens, two columns on phones)
+function sponsorSides(w) {
+  const sp = Array.isArray(w?.sponsors) ? w.sponsors.filter((x) => x && x.img) : [];
+  if (!sp.length) return "";
+  const img = (x) => `<img src="${esc(x.img)}" alt="${esc(x.name || "Sponsor")}" loading="lazy">`;
+  const left = sp.filter((_, i) => i % 2 === 0), right = sp.length > 1 ? sp.filter((_, i) => i % 2 === 1) : left;
+  return `<aside class="sp-rail left" aria-label="Sponsors"><div class="sp-by">Sponsored by:</div>${left.map(img).join("")}</aside>
+    <aside class="sp-rail right" aria-hidden="${sp.length > 1 ? "false" : "true"}"><div class="sp-by">Sponsored by:</div>${right.map(img).join("")}</aside>
+    <section class="card sp-card" aria-label="Sponsors"><div class="sp-by">Sponsored by:</div><div class="sp-cols"><div>${left.map(img).join("")}</div><div>${(sp.length > 1 ? right : []).map(img).join("")}</div></div></section>`;
+}
+function setHtml(node, html) { if (node && node.dataset.h !== html) { node.innerHTML = html; node.dataset.h = html; } }
+
 function wheelTabs(w, active) {
   return `<div class="wheel-tabs"><a href="#/home" class="back">← All wheels</a><div class="row" style="gap:6px">
     <a href="#/w/${w.id}" class="${active === "w" ? "on" : ""}">Numbers</a><a href="#/draw/${w.id}" class="${active === "draw" ? "on" : ""}">Wheel</a>${isAdm() ? `<a href="#/admin/${w.id}" class="${active === "admin" ? "on" : ""}">Manage</a>` : ""}</div></div>`;
@@ -209,16 +229,16 @@ function WheelsView() {
     update() {
       const list = sortedWheels();
       if (!list.length) {
-        $("#list", el).innerHTML = `<div class="card banner" style="grid-column:1/-1"><div style="font-size:44px">🎡</div><h2>No prizes yet</h2><p class="muted">${isAdm() ? "Add your first wheel to start." : "Come back soon!"}</p>${isAdm() ? `<button class="btn gold" id="addW2">+ Add wheel</button>` : ""}</div>`;
+        $("#list", el).dataset.h = ""; $("#list", el).innerHTML = `<div class="card banner" style="grid-column:1/-1"><div style="font-size:44px">🎡</div><h2>No prizes yet</h2><p class="muted">${isAdm() ? "Add your first wheel to start." : "Come back soon!"}</p>${isAdm() ? `<button class="btn gold" id="addW2">+ Add wheel</button>` : ""}</div>`;
         const b = $("#addW2", el); if (b) b.onclick = () => openAddWheel();
         return;
       }
-      $("#list", el).innerHTML = list.map((w) => {
+      setHtml($("#list", el), list.map((w) => {
         const T = total(w), taken = numsOf(w.id).filter((d) => d.n <= T).length, pd = paid(w).length, st = wheelStatus(w);
         const mine = numsOf(w.id).filter((d) => d.uid === myId()).length;
         const href = st === "open" ? `#/w/${w.id}` : `#/draw/${w.id}`;
         const cta = st === "open" ? "Pick numbers →" : st === "done" ? "See the result →" : "Watch the wheel →";
-        return `<a class="card wheel-card" href="${href}">
+        return `<a class="card wheel-card" href="${href}">${sponsorStrip(w)}
           <div class="prize-img" style="${imgStyle(w)}">${w.prizeImage ? "" : "🎁"}</div>
           <div class="wc-body"><div class="row" style="justify-content:space-between;gap:6px">${statusChip(w)}${mine && !isAdm() ? `<span class="chip green">Yours: ${mine}</span>` : ""}</div>
             <h2>${esc(w.prizeTitle)}</h2>
@@ -226,7 +246,7 @@ function WheelsView() {
             ${st === "done" ? `<div class="small" style="margin-top:6px">🏆 Winner: <b style="color:var(--gold)">${esc(w.draw?.winner?.name)} #${w.draw?.winner?.n}</b></div>` : w.drawAt ? `<div class="small muted" style="margin-top:4px">Draw: ${esc(fmtDate(w.drawAt))}</div>` : ""}
             <div class="progress"><div style="width:${(pd / T) * 100}%"></div></div>
             <div class="wc-cta">${cta}</div></div></a>`;
-      }).join("");
+      }).join(""));
     },
   };
 }
@@ -235,13 +255,14 @@ function WheelsView() {
 function NumbersView(wid) {
   let el, mounted = false, self;
   const build = (w) => {
-    el.innerHTML = wheelTabs(w, "w") + `<section class="card"><div class="prize"><div class="prize-img" id="pImg">🎁</div><div>
+    el.innerHTML = wheelTabs(w, "w") + `<div id="spBar"></div><section class="card"><div class="prize"><div class="prize-img" id="pImg">🎁</div><div>
           <div class="label">Prize</div><h1 id="pTitle"></h1><div class="muted" id="pDesc"></div>
           <div class="stats"><div class="stat"><b id="stPrice"></b><small>per number</small></div><div class="stat"><b id="stLeft"></b><small>numbers left</small></div><div class="stat"><b id="stDraw"></b><small>draw</small></div></div>
           <div class="progress"><div id="prog"></div></div></div></div></section>
         <section id="soldBanner"></section>
         <section class="card" id="howCard"><h2>How it works</h2>
           <ol class="steps"><li>Tap the numbers you want, then tap <b>OK</b>.</li><li>Send the total with <b>Whish</b> to <b id="wNum1"></b>.</li><li>Write your name and phone number and confirm.</li><li>Once the admin approves, the numbers are yours and you get a WhatsApp message.</li></ol></section>
+        <div id="spSides"></div>
         <section class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Choose your numbers</h2><span class="small muted" id="selInfo"></span></div><div class="spacer"></div>
           <div class="legend"><span><i style="background:rgba(255,255,255,.14)"></i>Free</span><span><i style="background:var(--gold)"></i>Selected</span><span><i style="background:var(--red)"></i>Taken</span><span><i style="background:var(--green)"></i>Yours</span></div>
           <div class="numgrid" id="grid"></div></section>
@@ -258,6 +279,8 @@ function NumbersView(wid) {
     update() {
       const w = W(wid); if (!w) { mounted = false; return notFound(el); }
       if (!mounted) { build(w); mounted = true; }
+      setHtml($("#spBar", el), sponsorStrip(w));
+      setHtml($("#spSides", el), sponsorSides(w));
       const T = total(w), m = numMap(wid), me = myId(), locked = !!w.draw;
       $("#pTitle", el).textContent = w.prizeTitle || "Prize";
       $("#pDesc", el).textContent = w.prizeDesc || "";
@@ -506,13 +529,14 @@ function DrawView(wid) {
     update() {
       const w = W(wid); if (!w) { mounted = false; return notFound(el); }
       if (!mounted) {
-        el.innerHTML = wheelTabs(w, "draw") + `<section class="card" style="text-align:center;padding-top:14px"><div class="small muted" id="wPrize"></div>
+        el.innerHTML = wheelTabs(w, "draw") + `<div id="spBar"></div><section class="card" style="text-align:center;padding-top:14px"><div class="small muted" id="wPrize"></div>
           <div class="now-name" id="nowName">&nbsp;</div>
           <div class="wheel-wrap"><div class="pointer"></div><canvas id="wheel" width="${SIZE}" height="${SIZE}"></canvas><div class="hub">★</div></div>
           <div class="draw-status" id="status"></div></section>
           <section class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Players</h2><span class="small muted" id="pCount"></span></div><div class="spacer"></div><div class="players" id="players"></div></section>`;
         cvs = $("#wheel", el); ctx = cvs.getContext("2d"); offKey = ""; mounted = true;
       }
+      setHtml($("#spBar", el), sponsorStrip(w));
       entries = w.draw && w.draw.entries ? w.draw.entries : paid(w).map((d) => ({ n: d.n, name: d.name, uid: d.uid }));
       $("#wPrize", el).textContent = "Prize: " + (w.prizeTitle || "");
       buildOff();
@@ -746,6 +770,12 @@ function WheelAdminView(wid) {
         <div class="row"><input type="datetime-local" id="drawAt" class="grow" style="width:auto"><button class="btn gold" id="saveDraw">Save</button><button class="btn ghost" id="clearDraw">Clear</button></div>
         <p class="small" id="drawInfo"></p><a class="btn ghost sm" href="#/draw/${w.id}">Open the wheel →</a></section>
 
+      <section class="card"><h2>Sponsors</h2>
+        <p class="muted small" style="margin-top:0">Their logos scroll in a thin bar above this prize. No logos = no bar.</p>
+        <div class="sp-admin" id="spList"></div>
+        <label class="btn gold" style="cursor:pointer;margin-top:10px">+ Add sponsor logo<input type="file" id="spFile" accept="image/*" multiple hidden></label>
+        <div id="spPrev" style="margin-top:14px"></div></section>
+
       <section class="card"><h2>Prize &amp; price</h2><form id="setForm">
         <label class="field"><span>Prize name</span><input name="prizeTitle" maxlength="60" required></label>
         <label class="field"><span>Description</span><textarea name="prizeDesc" maxlength="300"></textarea></label>
@@ -795,6 +825,21 @@ function WheelAdminView(wid) {
       await api.deleteWheel(wid); toast("Wheel deleted"); location.hash = "#/admin";
     };
     const fill = $("#fill", el); if (fill) fill.onclick = () => api.fillDemo(wid, total(W(wid)));
+    $("#spFile", el).onchange = async (e) => {
+      const files = [...e.target.files]; e.target.value = ""; if (!files.length) return;
+      const cur = [...(W(wid)?.sponsors || [])];
+      if (cur.length + files.length > 12) return toast("Up to 12 sponsors per wheel.");
+      try {
+        for (const f of files) cur.push({ img: await resizeLogo(f), name: f.name.replace(/\.[^.]+$/, "").slice(0, 40) });
+        await api.saveWheel(wid, { sponsors: cur }); toast(files.length > 1 ? files.length + " logos added ✓" : "Logo added ✓");
+      } catch (er) { toast(er.message || "Couldn't add the logo"); }
+    };
+    $("#spList", el).addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-sp]"); if (!b) return;
+      if (!(await askConfirm("Remove this sponsor?", { ok: "Remove", danger: true }))) return;
+      const cur = [...(W(wid)?.sponsors || [])]; cur.splice(Number(b.dataset.sp), 1);
+      try { await api.saveWheel(wid, { sponsors: cur }); toast("Removed"); } catch (er) { toast(er.message); }
+    });
 
     // add numbers yourself
     $("#aGrid", el).addEventListener("click", (e) => {
@@ -924,6 +969,9 @@ function WheelAdminView(wid) {
     update() {
       const w = W(wid); if (!w) { mounted = false; return notFound(el); }
       if (!mounted) { build(w); mounted = true; }
+      const sp = w.sponsors || [];
+      setHtml($("#spList", el), sp.length ? sp.map((x, i) => `<div class="sp-tile"><img src="${esc(x.img)}" alt="${esc(x.name || "Sponsor")}"><button type="button" class="sp-x" data-sp="${i}" aria-label="Remove ${esc(x.name || "sponsor")}">×</button></div>`).join("") : `<div class="empty">No sponsors yet.</div>`);
+      setHtml($("#spPrev", el), sp.length ? `<div class="small muted" style="margin-bottom:6px">Preview</div>` + sponsorStrip(w) : "");
       $("#drawInfo", el).innerHTML = w.drawAt ? `Current: <b>${esc(fmtDate(w.drawAt))}</b>${w.draw ? " · <span style='color:var(--green)'>draw done ✓</span>" : ""}` : `<span class="muted">No date set yet.</span>`;
       const pend = pendingReqs(wid);
       $("#pendCount", el).textContent = pend.length ? `(${pend.length})` : "";
@@ -938,6 +986,20 @@ function WheelAdminView(wid) {
       const so = $("#sold", el); if (so.dataset.h !== sh) { so.innerHTML = sh; so.dataset.h = sh; }
     },
   };
+}
+function resizeLogo(file) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 96 / img.height, 320 / img.width), c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      let d = c.toDataURL("image/webp", 0.85); if (!d.startsWith("data:image/webp")) d = c.toDataURL("image/png");
+      res(d);
+    };
+    img.onerror = () => rej(new Error("That file is not an image."));
+    img.src = url;
+  });
 }
 function resizeImage(file, max) {
   return new Promise((res, rej) => {
