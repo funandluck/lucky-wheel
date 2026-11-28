@@ -38,23 +38,25 @@ function wheelStatus(w) {
 const STATUS_LABEL = { open: ["Open", "green"], soldout: ["Sold out", "amber"], scheduled: ["Draw scheduled", "amber"], ready: ["Draw time!", "red"], spinning: ["LIVE now", "red"], done: ["Finished", ""] };
 const statusChip = (w) => { const [t, c] = STATUS_LABEL[wheelStatus(w)]; return `<span class="chip ${c}">${t}</span>`; };
 
-// thin scrolling bar of sponsor logos (nothing when the wheel has no sponsors)
+// sponsors: each item {img, name, fit: "cover" (photo) | "contain" (logo with transparency)}
+const spList = (w) => (Array.isArray(w?.sponsors) ? w.sponsors.filter((x) => x && x.img) : []);
+const spImg = (x, cls = "") => `<img class="${cls} ${x.fit === "contain" ? "fit-contain" : "fit-cover"}" src="${esc(x.img)}" alt="${esc(x.name || "Sponsor")}" loading="lazy">`;
+// thin scrolling bar above the prize (nothing when no sponsors)
 function sponsorStrip(w) {
-  const sp = Array.isArray(w?.sponsors) ? w.sponsors.filter((x) => x && x.img) : [];
-  if (!sp.length) return "";
-  const one = sp.map((x) => `<img src="${esc(x.img)}" alt="${esc(x.name || "Sponsor")}" loading="lazy">`).join("");
-  const reps = Math.max(1, Math.ceil(8 / sp.length)), half = one.repeat(reps);
-  return `<div class="sponsors" aria-label="Sponsors"><div class="sp-track" style="animation-duration:${Math.max(14, reps * sp.length * 3)}s">${half}${half}</div></div>`;
+  const sp = spList(w); if (!sp.length) return "";
+  const one = sp.map((x) => `<span class="sp-chip">${spImg(x)}${x.name ? `<b>${esc(x.name)}</b>` : ""}</span>`).join("");
+  const reps = Math.max(1, Math.ceil(6 / sp.length)), half = one.repeat(reps);
+  return `<div class="sponsors" aria-label="Sponsors"><div class="sp-track" style="animation-duration:${Math.max(16, reps * sp.length * 4)}s">${half}${half}</div></div>`;
 }
-// "Sponsored by" on the left and right of the numbers page (side rails on big screens, two columns on phones)
+// "Sponsored by" on the numbers page: side rails on big screens, an elegant card on phones
 function sponsorSides(w) {
-  const sp = Array.isArray(w?.sponsors) ? w.sponsors.filter((x) => x && x.img) : [];
-  if (!sp.length) return "";
-  const img = (x) => `<img src="${esc(x.img)}" alt="${esc(x.name || "Sponsor")}" loading="lazy">`;
-  const left = sp.filter((_, i) => i % 2 === 0), right = sp.length > 1 ? sp.filter((_, i) => i % 2 === 1) : left;
-  return `<aside class="sp-rail left" aria-label="Sponsors"><div class="sp-by">Sponsored by:</div>${left.map(img).join("")}</aside>
-    <aside class="sp-rail right" aria-hidden="${sp.length > 1 ? "false" : "true"}"><div class="sp-by">Sponsored by:</div>${right.map(img).join("")}</aside>
-    <section class="card sp-card" aria-label="Sponsors"><div class="sp-by">Sponsored by:</div><div class="sp-cols"><div>${left.map(img).join("")}</div><div>${(sp.length > 1 ? right : []).map(img).join("")}</div></div></section>`;
+  const sp = spList(w); if (!sp.length) return "";
+  const tile = (x) => `<figure class="sp-tile-pub">${spImg(x)}${x.name ? `<figcaption>${esc(x.name)}</figcaption>` : ""}</figure>`;
+  const left = sp.filter((_, i) => i % 2 === 0), right = sp.length > 1 ? sp.filter((_, i) => i % 2 === 1) : [];
+  const head = `<div class="sp-head"><span>Sponsored by</span></div>`;
+  return `<aside class="sp-rail left" aria-label="Sponsors">${head}${left.map(tile).join("")}</aside>
+    ${right.length ? `<aside class="sp-rail right" aria-label="Sponsors">${head}${right.map(tile).join("")}</aside>` : ""}
+    <section class="sp-card" aria-label="Sponsors">${head}<div class="sp-grid n${Math.min(sp.length, 4)}">${sp.map(tile).join("")}</div></section>`;
 }
 function setHtml(node, html) { if (node && node.dataset.h !== html) { node.innerHTML = html; node.dataset.h = html; } }
 
@@ -830,10 +832,16 @@ function WheelAdminView(wid) {
       const cur = [...(W(wid)?.sponsors || [])];
       if (cur.length + files.length > 12) return toast("Up to 12 sponsors per wheel.");
       try {
-        for (const f of files) cur.push({ img: await resizeLogo(f), name: f.name.replace(/\.[^.]+$/, "").slice(0, 40) });
+        for (const f of files) cur.push({ name: "", ...(await resizeLogo(f)) });
         await api.saveWheel(wid, { sponsors: cur }); toast(files.length > 1 ? files.length + " logos added ✓" : "Logo added ✓");
       } catch (er) { toast(er.message || "Couldn't add the logo"); }
     };
+    $("#spList", el).addEventListener("change", async (e) => {
+      const inp = e.target.closest("[data-spn]"); if (!inp) return;
+      const cur = [...(W(wid)?.sponsors || [])], i = Number(inp.dataset.spn); if (!cur[i]) return;
+      cur[i] = { ...cur[i], name: inp.value.trim().slice(0, 30) };
+      try { await api.saveWheel(wid, { sponsors: cur }); toast("Saved ✓"); } catch (er) { toast(er.message); }
+    });
     $("#spList", el).addEventListener("click", async (e) => {
       const b = e.target.closest("[data-sp]"); if (!b) return;
       if (!(await askConfirm("Remove this sponsor?", { ok: "Remove", danger: true }))) return;
@@ -970,7 +978,7 @@ function WheelAdminView(wid) {
       const w = W(wid); if (!w) { mounted = false; return notFound(el); }
       if (!mounted) { build(w); mounted = true; }
       const sp = w.sponsors || [];
-      setHtml($("#spList", el), sp.length ? sp.map((x, i) => `<div class="sp-tile"><img src="${esc(x.img)}" alt="${esc(x.name || "Sponsor")}"><button type="button" class="sp-x" data-sp="${i}" aria-label="Remove ${esc(x.name || "sponsor")}">×</button></div>`).join("") : `<div class="empty">No sponsors yet.</div>`);
+      setHtml($("#spList", el), sp.length ? sp.map((x, i) => `<div class="sp-adm"><div class="sp-adm-img">${spImg(x)}<button type="button" class="sp-x" data-sp="${i}" aria-label="Remove sponsor">×</button></div><input class="sp-name" data-spn="${i}" maxlength="30" placeholder="Name (optional)" value="${esc(x.name || "")}"></div>`).join("") : `<div class="empty">No sponsors yet.</div>`);
       setHtml($("#spPrev", el), sp.length ? `<div class="small muted" style="margin-bottom:6px">Preview</div>` + sponsorStrip(w) : "");
       $("#drawInfo", el).innerHTML = w.drawAt ? `Current: <b>${esc(fmtDate(w.drawAt))}</b>${w.draw ? " · <span style='color:var(--green)'>draw done ✓</span>" : ""}` : `<span class="muted">No date set yet.</span>`;
       const pend = pendingReqs(wid);
@@ -991,11 +999,14 @@ function resizeLogo(file) {
   return new Promise((res, rej) => {
     const img = new Image(), url = URL.createObjectURL(file);
     img.onload = () => {
-      const k = Math.min(1, 96 / img.height, 320 / img.width), c = document.createElement("canvas");
+      const k = Math.min(1, 320 / Math.max(img.width, img.height)), c = document.createElement("canvas");
       c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
-      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
-      let d = c.toDataURL("image/webp", 0.85); if (!d.startsWith("data:image/webp")) d = c.toDataURL("image/png");
-      res(d);
+      const x = c.getContext("2d"); x.drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      // logos with a transparent background are shown whole; photos fill their tile
+      let transparent = false;
+      try { const d = x.getImageData(0, 0, c.width, c.height).data; for (let p = 3; p < d.length; p += 16) if (d[p] < 200) { transparent = true; break; } } catch (e) {}
+      let data = c.toDataURL("image/webp", 0.82); if (!data.startsWith("data:image/webp")) data = transparent ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.82);
+      res({ img: data, fit: transparent ? "contain" : "cover" });
     };
     img.onerror = () => rej(new Error("That file is not an image."));
     img.src = url;
