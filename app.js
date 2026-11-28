@@ -45,8 +45,9 @@ function wheelTabs(w, active) {
 const notFound = (el) => (el.innerHTML = `<div class="card banner"><h2>Wheel not found</h2><p class="muted">It may have been deleted.</p><a class="btn gold" href="#/home">All wheels</a></div>`);
 
 /* ---------------- WhatsApp ---------------- */
-const TPL_THANKS = "شكراً {name} 🙏\nتم تأكيد دفعتك وحجز أرقامك بدولاب {prize}: {numbers}\nمنبلّغك بموعد السحب قريباً.\nتابع الدولاب من هون:\n{link}\nبالتوفيق 🍀";
+const TPL_THANKS = "شكراً {name} 🙏\nتم تأكيد دفعتك وحجز أرقامك بدولاب {prize}: {numbers}\nمنبلّغك بموعد السحب قريباً.\nتابع الدولاب من هون:\n{link}\n{group}\nبالتوفيق 🍀";
 const TPL_DRAW = "مرحبا {name} 👋\nانباعت كل أرقام دولاب {prize}! 🎉\nالسحب: {date}\nأرقامك: {numbers}\nفوت عالموقع بهالوقت لتشوف الدولاب عم يبرم مباشرة:\n{link}\nحظاً سعيداً 🍀";
+const TPL_GROUP = "مرحبا 👋\nانباعت كل أرقام دولاب {prize}! 🎉\nالسحب: {date}\nفوتوا عالموقع بهالوقت لتشوفوا الدولاب عم يبرم مباشرة:\n{link}\nحظاً سعيداً للكل 🍀";
 const tpl = (k) => lsGet("tpl_" + k) || (k === "thanks" ? TPL_THANKS : TPL_DRAW);
 const fmtDateAr = (ms) => new Date(ms).toLocaleString("ar-LB-u-nu-latn", { weekday: "long", day: "numeric", month: "long", hour: "numeric", minute: "2-digit" });
 const drawLink = (wid) => location.origin + location.pathname.replace(/index\.html$/, "") + "#/draw/" + wid;
@@ -61,9 +62,13 @@ function intlPhone(raw) {
   return d.length >= 10 ? d : "";
 }
 function fillMsg(t, { name, w, nums }) {
+  const g = w?.groupLink ? "\nفوت على جروب الدولاب ليوصلك موعد السحب 👇\n" + w.groupLink + "\n" : "\n📲 احفظ رقمي عندك ليوصلك موعد السحب\n";
   return t.replace(/\{name\}/g, name || "").replace(/\{prize\}/g, w?.prizeTitle || "").replace(/\{date\}/g, w?.drawAt ? fmtDateAr(w.drawAt) : "قريباً")
-    .replace(/\{numbers\}/g, [...nums].sort((a, b) => a - b).join("، ")).replace(/\{link\}/g, w ? drawLink(w.id) : "");
+    .replace(/\{numbers\}/g, [...nums].sort((a, b) => a - b).join("، ")).replace(/\{link\}/g, w ? drawLink(w.id) : "").replace(/\{group\}/g, g)
+    .replace(/\n{3,}/g, "\n\n").trim();
 }
+// the thank-you always invites to the wheel's WhatsApp group when it has one
+const thanksTpl = () => { const t = tpl("thanks"); return t.includes("{group}") ? t : t + "\n{group}"; };
 const waLink = (phone, text) => { const p = intlPhone(phone); return p ? `https://wa.me/${p}?text=${encodeURIComponent(text)}` : ""; };
 function copyRaw(t, msg) {
   (navigator.clipboard?.writeText(t) || Promise.reject()).then(() => toast(msg), () => {
@@ -283,7 +288,8 @@ function NumbersView(wid) {
       $("#buybar", el).classList.toggle("show", sel.length > 0);
       const mine = isAdm() ? [] : numsOf(wid).filter((d) => d.uid === me).sort((a, b) => a.n - b.n);
       $("#mineCard", el).hidden = !mine.length;
-      $("#mine", el).innerHTML = `<div class="chips">${mine.map((d) => `<span class="chip ${d.status === "paid" ? "green" : "amber"}">#${d.n} · ${d.status === "paid" ? "approved ✓" : "waiting for approval"}</span>`).join("")}</div>${mine.some((d) => d.status !== "paid") ? `<p class="small muted" style="margin:10px 0 0">The admin checks your Whish payment, then confirms on WhatsApp.</p>` : ""}`;
+      const joinBtn = w.groupLink && mine.some((d) => d.status === "paid") ? `<a class="btn green block" style="margin-top:12px;text-align:center" href="${esc(w.groupLink)}" target="_blank" rel="noopener">Join the WhatsApp group for the draw</a>` : "";
+      $("#mine", el).innerHTML = joinBtn + `<div class="chips">${mine.map((d) => `<span class="chip ${d.status === "paid" ? "green" : "amber"}">#${d.n} · ${d.status === "paid" ? "approved ✓" : "waiting for approval"}</span>`).join("")}</div>${mine.some((d) => d.status !== "paid") ? `<p class="small muted" style="margin:10px 0 0">The admin checks your Whish payment, then confirms on WhatsApp.</p>` : ""}`;
     },
   };
 }
@@ -587,7 +593,7 @@ function requestsHtml(list, showWheel) {
   if (!list.length) return `<div class="empty">No requests waiting. New ones appear here instantly.</div>`;
   return list.map((r) => {
     const w = W(r.wheelId), nums = [...r.nums].sort((a, b) => a - b);
-    const link = waLink(r.phone, fillMsg(tpl("thanks"), { name: r.name, w, nums }));
+    const link = waLink(r.phone, fillMsg(thanksTpl(), { name: r.name, w, nums }));
     const approve = link
       ? `<a class="btn sm green" data-approve="${r.id}" href="${esc(link)}" target="_blank" rel="noopener">Approve + WhatsApp</a>`
       : `<button class="btn sm green" data-approve="${r.id}">Approve</button>`;
@@ -730,10 +736,11 @@ function WheelAdminView(wid) {
 
       <section class="card"><h2>Sold numbers <span class="muted" id="soldCount"></span></h2><div class="table-wrap" id="sold"></div></section>
 
-      <section class="card" id="notifyCard"><h2>Tell everyone the draw time</h2>
-        <p class="muted small" style="margin-top:0">One WhatsApp per person, with their numbers. <span id="notifyHint"></span></p>
-        <div class="row" style="margin-bottom:10px"><button class="btn ghost sm" id="nCopyAll">Copy all phone numbers</button><a class="btn ghost sm" href="#/admin">Edit message</a></div>
-        <div id="notifyList"></div></section>
+      <section class="card" id="notifyCard"><h2>📣 Tell everyone the draw time</h2>
+        <p class="muted small" style="margin-top:0"><span id="notifyHint"></span></p>
+        <button class="btn gold block" id="nGroup" style="font-size:18px">📋 Copy the message</button>
+        <p class="small muted" style="margin:10px 0 0">Then paste it in your WhatsApp broadcast (or group) and press Send.</p>
+        <div id="notifyList" hidden></div></section>
 
       <section class="card"><h2>Draw date &amp; time</h2><p class="muted small" style="margin-top:0">When this time comes, the <b>START</b> button appears on the wheel page (only for you). Everyone sees the spin live.</p>
         <div class="row"><input type="datetime-local" id="drawAt" class="grow" style="width:auto"><button class="btn gold" id="saveDraw">Save</button><button class="btn ghost" id="clearDraw">Clear</button></div>
@@ -807,11 +814,24 @@ function WheelAdminView(wid) {
       try {
         await api.adminAdd(wid, nums, name, phone);
         pick.clear(); af.reset(); renderAdd();
-        const link = waLink(phone, fillMsg(tpl("thanks"), { name, w: W(wid), nums }));
+        const link = waLink(phone, fillMsg(thanksTpl(), { name, w: W(wid), nums }));
         modal(`<div style="text-align:center"><div style="font-size:48px">✅</div><h3>Added</h3><p class="muted">${nums.map((n) => "#" + n).join(", ")} are now sold to <b>${esc(name)}</b>.</p>${link ? `<a class="btn green block" href="${esc(link)}" target="_blank" rel="noopener" data-close>Send thank-you on WhatsApp</a><div class="spacer"></div>` : ""}<button class="btn ghost block" data-close>Done</button></div>`);
       } catch (er) { err.textContent = er.message; if (er.taken) { er.taken.forEach((n) => pick.delete(n)); } renderAdd(); }
     };
-    $("#nCopyAll", el).onclick = () => { const ps = participants(W(wid)).map((p) => intlPhone(p.phone)).filter(Boolean); if (!ps.length) return toast("No phone numbers yet"); copyRaw(ps.map((x) => "+" + x).join("\n"), ps.length + " numbers copied"); };
+    void 0; if ($("#nAll", el)) $("#nAll", el).onclick = () => sendToAll();
+    $("#nGroup", el).onclick = () => { const w = W(wid); copyRaw(fillMsg(TPL_GROUP, { name: "", w, nums: [] }), "Copied ✓ Paste it in WhatsApp and Send."); };
+    void 0; if ($("#nVcf", el)) $("#nVcf", el).onclick = () => {
+      const w = W(wid), ps = participants(w).filter((p) => intlPhone(p.phone));
+      if (!ps.length) return toast("No phone numbers yet");
+      const clean = (t) => String(t).replace(/[\r\n;,]/g, " ");
+      const vcf = ps.map((p) => `BEGIN:VCARD\r\nVERSION:3.0\r\nFN:${clean(p.name)} (${clean(w.prizeTitle)})\r\nN:${clean(p.name)};;;;\r\nTEL;TYPE=CELL:+${intlPhone(p.phone)}\r\nNOTE:Lucky Wheel ${clean(w.prizeTitle)} #${p.nums.join(" #")}\r\nEND:VCARD`).join("\r\n");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([vcf], { type: "text/vcard" }));
+      a.download = `lucky-wheel-${String(w.prizeTitle).replace(/[^\w]+/g, "-").slice(0, 30)}.vcf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast(ps.length + " contacts downloaded. Open the file to add them.");
+    };
+    void 0; if ($("#nCopyAll", el)) $("#nCopyAll", el).onclick = () => { const ps = participants(W(wid)).map((p) => intlPhone(p.phone)).filter(Boolean); if (!ps.length) return toast("No phone numbers yet"); copyRaw(ps.map((x) => "+" + x).join("\n"), ps.length + " numbers copied"); };
     $("#notifyList", el).addEventListener("click", (e) => { const a = e.target.closest("a[data-key]"); if (!a) return; const k = "sent_" + wid + "_" + (W(wid)?.drawAt || 0); const m = JSON.parse(lsGet(k) || "{}"); m[a.dataset.key] = 1; lsSet(k, JSON.stringify(m)); setTimeout(() => refresh(), 300); });
     $("#sold", el).addEventListener("click", (e) => { const b = e.target.closest("[data-n]"); if (b) { const d = numMap(wid)[Number(b.dataset.n)]; if (d) showNumber(d); } });
     bindRequestActions(el);
@@ -848,6 +868,44 @@ function WheelAdminView(wid) {
     const b = $("#aBtn", el), nums = [...pick].sort((a, b) => a - b);
     b.disabled = !nums.length;
     b.textContent = nums.length ? `Add ${nums.length > 1 ? nums.length + " numbers" : "#" + nums[0]} as sold (${money(nums.length * w.price, w)})` : "Select numbers above";
+  }
+
+  // one tap per person, automatically moves to the next one
+  function sendToAll() {
+    const w = W(wid); if (!w) return;
+    const key = "sent_" + wid + "_" + (w.drawAt || 0);
+    const getSent = () => JSON.parse(lsGet(key) || "{}");
+    const all = participants(w).filter((p) => intlPhone(p.phone));
+    if (!all.length) return toast("No phone numbers yet");
+    let skipped = new Set();
+    modal(`<div id="qBox"></div>`, {
+      onMount(m, close) {
+        const box = $("#qBox", m);
+        const draw = () => {
+          const sent = getSent(), left = all.filter((p) => !sent[p.key] && !skipped.has(p.key)), done = all.length - left.length;
+          if (!left.length) {
+            box.innerHTML = `<div style="text-align:center"><div style="font-size:50px">✅</div><h3>Everyone got the message</h3><p class="muted">${Object.keys(sent).length} of ${all.length} sent.${skipped.size ? " " + skipped.size + " skipped." : ""}</p><button class="btn gold block" id="qDone">Done</button></div>`;
+            $("#qDone", box).onclick = () => { close(); refresh(); };
+            return;
+          }
+          const p = left[0], link = waLink(p.phone, fillMsg(tpl("draw"), { name: p.name, w, nums: p.nums }));
+          box.innerHTML = `<h3>📣 Send to everyone</h3>
+            ${!w.drawAt ? `<p class="small" style="color:var(--amber)">No draw date yet: the message will say “قريباً”.</p>` : ""}
+            <div class="progress" style="margin:6px 0 14px"><div style="width:${(done / all.length) * 100}%"></div></div>
+            <p class="muted small" style="margin:0">${done + 1} of ${all.length}</p>
+            <p style="margin:4px 0 2px;font-size:22px;font-weight:800">${esc(p.name)}</p>
+            <p class="small muted" style="margin:0 0 14px">${esc(p.phone)} · ${p.nums.map((n) => "#" + n).join(" ")}</p>
+            <a class="btn green block" id="qGo" href="${esc(link)}" target="_blank" rel="noopener" style="text-align:center;font-size:18px">Send on WhatsApp ▶</a>
+            <p class="small muted" style="margin:10px 0 12px">Tap, press Send in WhatsApp, come back here. The next person is ready automatically.</p>
+            <div class="row"><button class="btn ghost sm" id="qSkip">Skip</button><span class="grow"></span><button class="btn ghost sm" id="qStop">Stop</button></div>`;
+          $("#qGo", box).onclick = () => { const s2 = getSent(); s2[p.key] = 1; lsSet(key, JSON.stringify(s2)); setTimeout(draw, 400); };
+          $("#qSkip", box).onclick = () => { skipped.add(p.key); draw(); };
+          $("#qStop", box).onclick = () => { close(); refresh(); };
+        };
+        draw();
+      },
+      dismiss: false,
+    });
   }
 
   function renderNotify() {
